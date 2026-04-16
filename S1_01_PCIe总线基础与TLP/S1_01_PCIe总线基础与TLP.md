@@ -361,3 +361,27 @@ cat /proc/interrupts | grep MSI
 ## 13. 下一步
 
 进入 **S1_02 — 链路层与 Flow Control + DOE**。
+
+---
+
+## 参考答案
+
+**1. 为什么 MRd 需要 CplD 返回数据，而 MWr 不需要？**
+
+答案：MRd 是 Non-Posted 事务，RC 发请求后必须等待 EP 返回数据，否则 RC 不知道 EP 存储的内容——读操作本质上是被动的，必须由响应方提供数据，所以需要 CplD。MWr 是 Posted 事务，写完即完成，RC 不等 EP 确认就继续执行下一步，牺牲可靠性换取性能（写操作本身不依赖返回值）。
+
+**2. 地址路由和 ID 路由分别用在哪些场景？**
+
+答案：地址路由用于 Memory Read/Write（MRd/MWr）和 I/O Read/Write（TLP Header 包含目标 PCIe 地址，Switch/bridge 根据地址查路由表决定出口）。ID 路由用于 Configuration Read/Write（CfgRd/CfgWr，通过 Bus/Device/Function 三元组定位设备）和 Completion（Cpl/CplD，通过 Requester ID 匹配原始请求）。
+
+**3. Switch 如何知道一个 TLP 应该从哪个下游端口转发？**
+
+答案：Switch 内部维护一张路由表，根据 TLP 的路由类型决定转发方向。对于地址路由：查地址范围表（Base/Limit 寄存器），匹配到哪个下游端口的地址范围就走哪个口。对于 ID 路由：查 Bus Number 注册表，Secondary Bus + Subordinate Bus 范围决定出口。对于隐式路由：上游来的 TLP 广播到所有下游端口，下游来的 TLP 转发到上游端口。
+
+**4. MSI 本质是什么 TLP？它的地址路由到哪里？**
+
+答案：MSI 本质是一个 Memory Write TLP（Posted），只是这个 MWr 的数据字段携带的是中断向量号。地址是 RC 分配的一个 MMIO 地址（不是 EP 的 BAR，是 RC 侧 MSI 地址），写入这个地址会触发 RC 侧的 MSI 中断控制器，产生 CPU 中断。简单说：MSI = 门铃，地址是"门铃编号"，数据是"按下的号码"。
+
+**5. 在 Linux 内核里，pci_read_config_word() 最终发出的是什么 TLP？**
+
+答案：pci_read_config_word() 最终发出的是 Configuration Read TLP（CfgRd），通过 ID 路由，Header 包含目标设备的 Bus/Dev/Func 和寄存器偏移。CfgRd 是 Non-Posted 事务，会收到 CplD（携带配置寄存器的值）。具体路径：pci_read_config_word() → bus->ops->read() → ECAM MMIO 读（或 IO 端口 0xcfc）。

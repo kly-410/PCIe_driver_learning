@@ -335,3 +335,27 @@ setpci -s XX:XX.X DOE_INT_STATUS
 ## 13. 下一步
 
 进入 **S1_03 — PCI/PCIe 配置空间（ECAM）**。
+
+---
+
+## 参考答案
+
+**1. 链路层如何保证 TLP 可靠传输？Ack/Nack 的重传窗口是多大？**
+
+答案：发送方在 TLP 外面加 LCRC（32-bit CRC）和 Sequence Number（4-bit，循环 0~15），并存入 Replay Buffer。接收方校验 LCRC，若正确则回 Ack DLLP（携带 Sequence Number），发送方从 Buffer 中删除对应 TLP。若校验失败则回 Nak DLLP，发送方从 NAK 对应的 Sequence 开始重发整个窗口。PCIe Spec 规定重传窗口最大为 16 个 TLP（Seq# 0~15 循环）。
+
+**2. Flow Control Credit 超额会导致什么问题？如何恢复？**
+
+答案：接收方 buffer 满时，如果发送方继续发 TLP，这些 TLP 会被丢弃，链路需要重训练（Recovery）恢复。表现为 lspci -vv 显示 "Negotiated Link Width" 下降，或 dmesg 报 "device link may not be reliable"。恢复方法：链路自动进入 Recovery → Equalization，重新协商宽度和速率，大多数情况下能自动恢复。如果反复出现，需检查两端 Max_Payload_Size 是否匹配。
+
+**3. DLLP 和 TLP 的根本区别是什么？DLLP 会被路由吗？**
+
+答案：TLP 是端到端的事务包，携带数据负载，从 initiator 到 target，中途可能被 Switch 路由转发。DLLP 是本地链路维护包，仅在相邻两个端口之间交换，不会被路由转发（hop-by-hop）。ACK/NACK/FC DLLP 只影响直接相连的两个端口，不穿透 Switch 上游或下游。
+
+**4. DOE Mailbox 和 ECAM 配置空间有什么本质区别？**
+
+答案：ECAM 是标准配置空间（每个设备 4KB），通过 Bus/Dev/Func/Reg 直接访问，大小固定，适合小数据读写（寄存器级别）。DOE 是 Mailbox 协议，基于 Memory Write/Memory Read 事务，通过 Vendor ID + Object Type + 数据内容交换，适合大数据块（VPD/CIS）或需要握手机制的场景，本质是一个带状态的同步协议。DOE 访问需要先查 DOE Capability，然后轮询/等待完成标志，比 ECAM 更复杂。
+
+**5. 在 Linux 内核里，pci_doe_write() 是同步还是异步？超时机制是什么？**
+
+答案：pci_doe_write() 是同步阻塞调用。内部实现：写请求数据 → 轮询 DOE_INT_STATUS 寄存器直到 DONE 位或 BUSY 位清零 → 超时则返回 -ETIMEDOUT（默认超时时间较长，由硬件决定，内核不做额外超时控制，只等待硬件完成）。由于是轮询，在中断上下文不能调用。

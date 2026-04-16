@@ -385,3 +385,31 @@ cat /sys/firmware/acpi/tables/MCFG | xxd | head -20
 ## 12. 下一步
 
 进入 **S1_04 — BAR 地址映射与解码**。
+
+---
+
+## 参考答案
+
+**1. ECAM 地址计算：bus=1, dev=0, fn=0, offset=0，基址 0xef800000，计算物理地址。**
+
+答案：ECAM 地址 = 基址 + (bus << 20) + (devfn << 12) + offset。devfn = (dev << 3) | fn = (0 << 3) | 0 = 0。计算：0xef800000 + (1 << 20) + (0 << 12) + 0 = 0xef800000 + 0x0010_0000 = 0xef900000。Python 验证：
+```python
+print(hex(0xef800000 + (1 << 20)))
+# 0xef900000
+```
+
+**2. Type 0 Header 和 Type 1 Header 的本质区别是什么？EP 能否转成 RC？**
+
+答案：Type 0（Endpoint）用于终端设备，配置空间只有 BAR（没有总线相关字段）。Type 1（Bridge/Switch）用于桥接设备，包含 Primary/Secondary/Subordinate Bus Number 字段（用于路由判断）。本质区别：Type 1 能转发 TLP（因为有 Bus 号范围），Type 0 不能。EP 不能转成 RC——RC 是 CPU 侧的 Root Complex，是硬件拓扑决定的，不是软件配置出来的。
+
+**3. Capability 链表的遍历终止条件是什么？next_ptr = 0 表示什么？**
+
+答案：遍历从 Offset 0x34（Header Type 0 设备）或 0x38（Type 1）的 Capabilities Pointer 开始，每读到一个 Cap 就读它的 Next Pointer（偏移+1 字节），直到读到 next_ptr = 0x00（链表结束）。如果读到 0xFF 表示 Capability 结构损坏（无效值），应终止遍历。
+
+**4. pci_read_config_dword() 最终发出的是什么 TLP？**
+
+答案：CfgRd（Configuration Read），通过 ID 路由，Header 包含 Bus#、Dev#、Func#、寄存器偏移。CfgRd 是 Non-Posted，EP 会返回 CplD（携带寄存器值）。如果访问的是 ECAM 空间，在物理层会通过 Memory Read TLP 访问 ECAM 窗口（因为 ECAM 本身是内存映射），但从 PCIe 协议层看发起的是 CfgRd TLP。
+
+**5. 为什么 BAR 的低 4 bits 有特殊含义？bit 0 = 1 和 bit 0 = 0 有什么区别？**
+
+答案：BAR 的 bit 0 表示类型（Space Indicator）：bit 0 = 0 表示 Memory Space，bit 0 = 1 表示 I/O Space。Memory BAR 的 bit 2:1 表示类型（00=32-bit，01=64-bit，10=预取），bit 3 表示预取属性。写入全 1 再读回时，bit 0~2 用于解码判断类型和 size，bit 0 的值不会被置 1，因为它是类型标志位，不是地址位。

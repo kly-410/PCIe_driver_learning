@@ -427,3 +427,33 @@ iowrite32(START_CMD, bar + DMA_CTRL_REG);
 ## 14. 下一步
 
 前 4 节完成，进入 **S2_01 — PCI 子系统初始化与驱动注册模型**。
+
+---
+
+## 参考答案
+
+**1. BAR[bit 0] = 0 表示什么？BAR[bit 3] = 1 表示什么？两者可以同时为 1 吗？**
+
+答案：BAR[bit 0] = 0 表示这是 Memory BAR（I/O Space Indicator = 0）。BAR[bit 3] = 1 表示 Prefetchable（可预取，允许写合并和读合并）。两者可以同时为 1——一个 32-bit 预取 Memory BAR 写入 0xFFFFFFFF 后，bit 0~3 的解码值为 0b1000（Prefetchable + 32-bit MEM）。注意：如果 bit 0 = 1（IO BAR），则 bit 3:1 必须为 0（IO 空间没有预取概念）。
+
+**2. 写入 0xFFFFFFFF 读回 0xFDF_0004，这个 BAR 申请了多少空间？**
+
+答案：先取反：~0xFDF_0004 = 0x020_FFFB，再清除类型位（& ~0xF）：0x020_FFFB & ~0xF = 0x020_FFF0。所以 size = 0x20_FFF0 bytes ≈ 216KB。
+```python
+sz = 0xFDF_0004
+size = (~sz) & ~0xF
+print(f"Size = 0x{size:X} = {size} bytes = {size/1024:.1f} KB")
+# Size = 0x20FFF0 = 216816 bytes ≈ 211.7 KB
+```
+
+**3. pci_request_regions() 和 ioremap() 的区别是什么？为什么要先 request 再 ioremap？**
+
+答案：pci_request_regions() 是向系统"注册"这段 BAR 的所有权（在 /proc/iomem 中标记为 used），防止其他驱动重复申请同一个 BAR 造成冲突。ioremap() 是建立 CPU 页表映射，将物理地址转换为内核虚拟地址，才能用指针访问。request 是软件资源管理（谁可以用），iorap 是硬件地址翻译（怎么去访问）。必须先 request 再 ioremap，因为 ioremap 前必须确认这个物理地址区间已经被本驱动合法持有。
+
+**4. 为什么 MMIO 读写要用 ioread32/iowrite32，不能直接解引用指针？**
+
+答案：三个原因：① 编译器优化——直接解引用可能因"无可见副作用"被优化掉或重排序；② CPU 内存序——x86 是弱序（Relaxed Order），store 指令可能 Posted（不等待刷新到 cache），需要 wmb() 强制刷写缓冲区；③ ioread32/iowrite32 是平台相关的 MMIO 访问函数，对应正确的 bus transaction 类型（不是 normal memory 访问），确保 Posted Write 被正确发出，非 Posted Read 等待完成。
+
+**5. 在真实 bring-up 中，如果 BAR 分配后 EP 读到的地址和系统分配的不一致，第一个怀疑什么？**
+
+答案：第一个怀疑 ATU（Address Translation Unit）配置错误。ATU 是 RC 侧的地址翻译硬件，负责将 CPU 虚拟地址/物理地址翻译为 PCIe 地址。如果 ATU Outbound 窗口的基址和大小配置错误，CPU 发出的地址就不会正确映射到 EP BAR 地址，导致 EP 读到的地址和系统分配的不一致。这是 bring-up 中 BAR 相关的第一排查项。
