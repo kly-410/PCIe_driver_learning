@@ -54,19 +54,21 @@ all:
 # 依赖：libpci（链接选项）
 tlp_type: S1_01_tlp_type.c
 	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS)
-#   展开后：gcc -Wall -Wextra -g -o S1_01_tlp_type S1_01_tlp_type.c -lpci
+	chmod +x $@
 
 # link_status 程序的编译规则
 # 输入：S1_01_link_status.c
 # 输出：S1_01_link_status
 link_status: S1_01_link_status.c
 	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS)
+	chmod +x $@
 
 # scan 程序的编译规则
 # 输入：S1_01_pci_scan.c
 # 输出：S1_01_pci_scan
 scan: S1_01_pci_scan.c
 	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS)
+	chmod +x $@
 
 # ========== 清理规则 ==========
 # make clean 删除所有编译产物，还原到干净状态

@@ -1,1 +1,6 @@
 .obsidian/
+*.o
+*.so
+*.ko
+scan
+S1_01_*
