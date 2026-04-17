@@ -1,8 +1,9 @@
 #!/bin/bash
 # S0_env_check.sh - PCIe 驱动开发环境验证（宿主机执行）
+# 平台：aarch64 virt (QEMU 9.0.0)
 echo "=== S0 环境验证 ==="
-echo "[1] QEMU 版本"
-/opt/qemu/bin/qemu-system-x86_64 --version 2>/dev/null || echo "ERROR"
+echo "[1] QEMU 版本 (aarch64)"
+qemu-system-aarch64 --version 2>/dev/null || echo "ERROR: qemu-system-aarch64 not found"
 echo "[2] GCC 版本"
 gcc --version 2>/dev/null | head -1 || echo "ERROR"
 echo "[3] GDB Python 支持"
@@ -11,6 +12,6 @@ echo "[4] Linux headers"
 ls /lib/modules/$(uname -r)/build 2>/dev/null >/dev/null && echo "OK" || echo "ERROR"
 echo "[5] PCI 子系统配置"
 grep -E "CONFIG_PCI=|CONFIG_PCI_MSI=|CONFIG_PCIEAER=" /boot/config-$(uname -r) 2>/dev/null | head -5 || echo "ERROR"
-echo "[6] /dev/kvm 权限"
-ls -l /dev/kvm 2>/dev/null || echo "ERROR"
+echo "[6] /dev/kvm 权限（aarch64 KVM 可能不可用，仅作参考）"
+ls -l /dev/kvm 2>/dev/null || echo "WARN: /dev/kvm not available (normal for aarch64 TCG mode)"
 echo "=== 验证完成 ==="
