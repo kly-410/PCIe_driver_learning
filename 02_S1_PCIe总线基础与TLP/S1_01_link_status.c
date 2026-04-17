@@ -13,6 +13,7 @@
  * 参考：PCIe Base Spec Rev 5.0 Chapter 7.8.3 (Link Status Register)
  *
  * 适配：pciutils 3.x（Ubuntu 24.04 libpci）
+ *   - pci_read_byte/word: 返回值方式，不需要指针参数
  */
 
 #include <stdio.h>
@@ -39,12 +40,11 @@ static const char *gen_str(int gen)
  */
 static int pcie_cap_find(struct pci_dev *dev)
 {
-    u8 pos = 0, id, next;
+    u8 pos = pci_read_byte(dev, PCI_CAPABILITY_LIST);
     int ttl = 48;
-    pci_read_byte(dev, PCI_CAPABILITY_LIST, &pos);
     while (ttl-- && pos) {
-        pci_read_byte(dev, pos, &id);
-        pci_read_byte(dev, pos + 1, &next);
+        u8 id   = pci_read_byte(dev, pos);
+        u8 next = pci_read_byte(dev, pos + 1);
         if (id == 0x10) return pos;
         if (id == 0xff) break;
         pos = next;
@@ -74,10 +74,9 @@ int main(int argc, char **argv)
     if (!cap) { printf("无 PCIe Cap\n"); return 1; }
 
     /* PCIe Cap + 0x12 = Link Status Register (PCI_EXP_LNKSTA) */
-    u16 lnksta;
-    pci_read_word(p, cap + 0x12, &lnksta);
+    u16 lnksta = pci_read_word(p, cap + 0x12);
 
-    int gen    = lnksta & 0xf;          /* Bit[3:0]  = Negotiated Link Speed */
+    int gen    = lnksta & 0xf;           /* Bit[3:0]  = Negotiated Link Speed */
     int width  = (lnksta >> 4) & 0x3f; /* Bit[9:4] = Negotiated Link Width */
     int traing = (lnksta >> 15) & 0x1; /* Bit[15]   = Link Training */
 
@@ -87,10 +86,9 @@ int main(int argc, char **argv)
     printf("  LTSSM     : %s\n", traing ? "L0（训练完成）" : "训练中 / Recovery");
 
     /* PCIe Cap + 0x0C = Link Capabilities Register */
-    u16 lcap;
-    pci_read_word(p, cap + 0x0C, &lcap);
-    int max_gen  = lcap & 0xf;           /* Bit[3:0]  = Max Link Speed */
-    int max_width = (lcap >> 4) & 0x3f;/* Bit[9:4] = Max Link Width */
+    u16 lcap = pci_read_word(p, cap + 0x0C);
+    int max_gen   = lcap & 0xf;
+    int max_width = (lcap >> 4) & 0x3f;
     printf("  硬件支持最大速率: Gen%d (%s)\n", max_gen, gen_str(max_gen));
     printf("  硬件支持最大宽度: x%d\n", max_width);
 

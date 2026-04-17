@@ -12,7 +12,9 @@
  *     00:00.0 通常是 RC（Host Bridge）
  *     01:00.0+ 是 EP 设备
  *
- * 适配：pciutils 3.x（Ubuntu 24.04 默认版本）
+ * 适配：pciutils 3.x（Ubuntu 24.04 libpci）
+ *   - pci_read_byte/word: 返回值方式，不需要指针参数
+ *   - 地址用 p->bus / p->dev / p->func 手动拼接
  */
 
 #include <stdio.h>
@@ -25,23 +27,18 @@
  *
  * PCIe Capability ID = 0x10
  * 每个 Capability 的结构：Byte[0]=ID, Byte[1]=Next Cap Pointer
- * 从 PCI_CAP_LIST_POINTER（通常是 0x34）开始遍历链表
+ * 从 PCI_CAPABILITY_LIST（=0x34）开始遍历链表
  *
  * 返回： PCIe Capability 的起始偏移（字节），找不到返回 0
  */
 static int pcie_cap_find(struct pci_dev *dev)
 {
-    u8 pos = 0, id, next;
+    u8 pos = pci_read_byte(dev, PCI_CAPABILITY_LIST);  /* 0x34 = 第一个 Cap 指针 */
     int ttl = 48;
 
-    /* PCI_CAP_LIST_POINTER（0x34）：第一个 Capability 的指针 */
-    pci_read_byte(dev, PCI_CAP_LIST_POINTER, &pos);
-
     while (ttl-- && pos) {
-        /* 读 Capability ID（Byte 0）*/
-        pci_read_byte(dev, pos, &id);
-        /* 读下一个 Capability 指针（Byte 1）*/
-        pci_read_byte(dev, pos + 1, &next);
+        u8 id   = pci_read_byte(dev, pos);        /* Byte 0 = Capability ID */
+        u8 next = pci_read_byte(dev, pos + 1);   /* Byte 1 = Next Cap Pointer */
         if (id == 0x10)
             return pos;  /* 找到 PCIe Capability（ID=0x10）*/
         if (id == 0xff)
@@ -53,7 +50,8 @@ static int pcie_cap_find(struct pci_dev *dev)
 
 int main(int argc, char **argv)
 {
-    /* 分配并初始化 pci_access 结构（必须先调用）*/
+    (void)argc; (void)argv;  /* 未使用参数，避免警告 */
+
     struct pci_access *pacc = pci_alloc();
     pci_init(pacc);       /* 初始化 libpci */
     pci_scan_bus(pacc);   /* 扫描总线，填充 devices 链表 */
@@ -65,19 +63,16 @@ int main(int argc, char **argv)
 
     /* 遍历总线上的每一个设备 */
     for (struct pci_dev *p = pacc->devices; p; p = p->next) {
-        char addr[13];
+        /* libpci 3.x 没有 pci_get_slot，手动拼接地址字符串 */
+        char addr[16];
+        snprintf(addr, sizeof(addr), "%04x:%02x:%02x.%x",
+                 p->domain_16, p->bus, p->dev, p->func);
 
-        /* pci_get_slot 把 device 地址格式化成 "Bus:Dev.Fn" 字符串 */
-        pci_get_slot(p, addr);
-
-        u16 vendor, device, class_code;
-        u8 hdr_type;
-
-        /* 读取配置空间标准寄存器 */
-        pci_read_word(p, PCI_VENDOR_ID, &vendor);
-        pci_read_word(p, PCI_DEVICE_ID, &device);
-        pci_read_word(p, PCI_CLASS_DEVICE, &class_code);
-        pci_read_byte(p, PCI_HEADER_TYPE, &hdr_type);
+        /* 读取配置空间标准寄存器（返回值方式，无指针参数）*/
+        u16 vendor     = pci_read_word(p, PCI_VENDOR_ID);
+        u16 device     = pci_read_word(p, PCI_DEVICE_ID);
+        u16 class_code = pci_read_word(p, PCI_CLASS_DEVICE);
+        u8 hdr_type    = pci_read_byte(p, PCI_HEADER_TYPE);
 
         if (vendor == 0xffff)
             continue;  /* 空槽（没有插设备），跳过 */
@@ -93,8 +88,7 @@ int main(int argc, char **argv)
         /* 找 PCIe Capability，从里面读 Device/Port Type */
         int pcie_cap = pcie_cap_find(p);
         if (pcie_cap) {
-            u16 pcie_hdr;
-            pci_read_word(p, pcie_cap, &pcie_hdr);
+            u16 pcie_hdr = pci_read_word(p, pcie_cap);
             u8 dev_type = (pcie_hdr >> 4) & 0xf;
 
             /* PCIe Spec 定义的各种设备类型 */
@@ -103,10 +97,10 @@ int main(int argc, char **argv)
                 "Legacy EP",       /* 1: Legacy PCI Express Endpoint   */
                 "?",               /* 2: Reserved                       */
                 "?",               /* 3: Reserved                       */
-                "RC Root Port",    /* 4: Root Port of RC                */
+                "RC Root Port",    /* 4: Root Port of RC               */
                 "Switch Port",     /* 5: Switch Port                   */
-                "Bridge",          /* 6: PCIe-to-PCI Bridge            */
-                "Bridge"           /* 7: PCIe-to-PCI Bridge (alt)      */
+                "Bridge",          /* 6: PCIe-to-PCI Bridge           */
+                "Bridge"           /* 7: PCIe-to-PCI Bridge (alt)     */
             };
             if (dev_type <= 7)
                 type_str = type_map[dev_type];

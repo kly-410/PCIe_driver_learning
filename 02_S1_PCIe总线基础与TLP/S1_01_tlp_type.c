@@ -20,6 +20,7 @@
  *   EP 发 MSI   → MsgD（Posted MWr）→ 地址路由（到 RC MSI 地址）
  *
  * 适配：pciutils 3.x（Ubuntu 24.04 libpci）
+ *   - pci_read_byte/word: 返回值方式，不需要指针参数
  */
 
 #include <stdio.h>
@@ -65,17 +66,12 @@ static const char *gen_str(int gen)
  */
 static int cap_find(struct pci_dev *dev, int id)
 {
-    u8 pos = 0, cap_id, next;
+    u8 pos = pci_read_byte(dev, PCI_CAPABILITY_LIST);  /* 0x34 = 第一个 Cap */
     int ttl = 48;
 
-    /* PCI_CAPABILITY_LIST（=0x34）：第一个 Capability 的指针 */
-    pci_read_byte(dev, PCI_CAPABILITY_LIST, &pos);
-
     while (ttl-- && pos) {
-        /* 读 Capability ID（Byte 0）*/
-        pci_read_byte(dev, pos, &cap_id);
-        /* 读下一个 Capability 指针（Byte 1）*/
-        pci_read_byte(dev, pos + 1, &next);
+        u8 cap_id  = pci_read_byte(dev, pos);      /* Byte 0 = ID */
+        u8 next   = pci_read_byte(dev, pos + 1);   /* Byte 1 = Next */
         if (cap_id == 0xff) break;   /* 链表结束 */
         if (cap_id == id)   return pos;  /* 找到目标 Capability */
         pos = next;  /* 跳到下一个 */
@@ -99,7 +95,7 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    /* 直接用 p->bus / p->dev / p->func 访问地址字段，不需要格式化函数 */
+    /* 直接用 p->bus / p->dev / p->func 访问地址字段 */
     struct pci_dev *p = pci_get_dev(pacc, 0, b, d, f);
     if (!p) {
         fprintf(stderr, "设备 %s 未找到\n", dev_id);
@@ -107,9 +103,9 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    u16 vendor, device;
-    pci_read_word(p, PCI_VENDOR_ID, &vendor);
-    pci_read_word(p, PCI_DEVICE_ID, &device);
+    /* 读取配置空间标准寄存器（返回值方式）*/
+    u16 vendor = pci_read_word(p, PCI_VENDOR_ID);
+    u16 device = pci_read_word(p, PCI_DEVICE_ID);
 
     printf("=== %s ===\n", dev_id);
     printf("  Vendor ID   : 0x%04x\n", vendor);
@@ -118,15 +114,14 @@ int main(int argc, char **argv)
     /* ========== PCIe Capability ========== */
     int pcie_cap = cap_find(p, 0x10);  /* PCIe Cap ID = 0x10 */
     if (pcie_cap) {
-        u16 pcie_hdr, lnksta;
-        /* PCIe Cap Header: Byte[0]=ID, Byte[1]=Next, Word[1]=Device/Port Type + Link Status */
-        pci_read_word(p, pcie_cap, &pcie_hdr);
+        /* PCIe Cap Header: Word[0] = Type + Status; Word[1] = */
+        u16 pcie_hdr = pci_read_word(p, pcie_cap);
         /* PCIe Cap + 0x12 = Link Status Register (PCI_EXP_LNKSTA) */
-        pci_read_word(p, pcie_cap + 0x12, &lnksta);
+        u16 lnksta = pci_read_word(p, pcie_cap + 0x12);
 
         u8 dev_type = (pcie_hdr >> 4) & 0xf;
         int gen   = lnksta & 0xf;
-        int width = (lnksta >> 4) & 0x3f;
+        int width  = (lnksta >> 4) & 0x3f;
 
         printf("  PCIe Cap    : offset 0x%02x\n", pcie_cap);
         printf("  Device Type : %s\n", pcie_type_str(dev_type));
@@ -139,9 +134,7 @@ int main(int argc, char **argv)
     /* ========== MSI Capability ========== */
     int msi_cap = cap_find(p, 0x05);  /* MSI Cap ID = 0x05 */
     if (msi_cap) {
-        u16 ctrl;
-        /* MSI Cap + 2 = Message Control Register */
-        pci_read_word(p, msi_cap + 2, &ctrl);
+        u16 ctrl = pci_read_word(p, msi_cap + 2);  /* Message Control */
         int vectors = 1 << ((ctrl >> 1) & 0x7);
         printf("  MSI Cap     : offset 0x%02x, %d vectors\n", msi_cap, vectors);
     }
@@ -150,8 +143,7 @@ int main(int argc, char **argv)
     printf("\n  TLP 角色分析:\n");
     int pcie = cap_find(p, 0x10);
     if (pcie) {
-        u16 hdr;
-        pci_read_word(p, pcie, &hdr);
+        u16 hdr = pci_read_word(p, pcie);
         u8 type = (hdr >> 4) & 0xf;
         if (type == 4)
             printf("    本设备是 RC Root Port\n"
