@@ -1,0 +1,27 @@
+# S0_01_Makefile - 环境验证 + 脚本执行
+.PHONY: all check env debug clean
+
+all: check
+
+check:
+	@echo "=== S0 环境检查 ==="
+	@which qemu-system-x86_64 >/dev/null 2>&1 && \
+		echo "[OK] QEMU: $$(qemu-system-x86_64 --version | head -1)" || \
+		echo "[FAIL] QEMU not found"
+	@gcc --version 2>/dev/null | head -1 || echo "[FAIL] gcc"
+	@gdb -batch -ex "python print(1)" 2>/dev/null >/dev/null && echo "[OK] GDB Python" || echo "[FAIL] GDB Python"
+	@ls /lib/modules/$$(uname -r)/build/Makefile 2>/dev/null >/dev/null && \
+		echo "[OK] linux-headers" || echo "[FAIL] linux-headers"
+	@echo "=== 检查完成 ==="
+
+env:
+	@bash S0_env_check.sh
+
+debug:
+	@bash S0_qemu_gdb_debug.sh
+
+test:
+	@bash S0_qemu_pcie_test.sh
+
+clean:
+	@echo "S0 无编译产物"
