@@ -2,7 +2,7 @@
 # S0_qemu_pcie_test.sh - QEMU PCIe RC 测试启动脚本
 # 用法：bash S0_qemu_pcie_test.sh
 set -e
-QEMU="${QEMU:-/opt/qemu/bin/qemu-system-x86_64}"
+QEMU="${QEMU:-/usr/local/bin/qemu-system-x86_64}"
 KERNEL="/boot/vmlinuz-$(uname -r)"
 INITRD="/boot/initrd.img-$(uname -r)"
 DISK="${DISK:-/tmp/virtpcitest.qcow2}"

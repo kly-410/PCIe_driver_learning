@@ -4,7 +4,7 @@
 # 然后另一个终端：gdb /usr/lib/debug/boot/vmlinuz-$(uname -r)
 # (gdb) target remote localhost:1234
 set -e
-QEMU="${QEMU:-/opt/qemu/bin/qemu-system-x86_64}"
+QEMU="${QEMU:-/usr/local/bin/qemu-system-x86_64}"
 KERNEL="/boot/vmlinuz-$(uname -r)"
 INITRD="/boot/initrd.img-$(uname -r)"
 DISK="${DISK:-/tmp/virtpcitest.qcow2}"
