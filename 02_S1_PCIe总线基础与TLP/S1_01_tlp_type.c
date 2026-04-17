@@ -18,6 +18,8 @@
  *   RC 写 EP → MWr（Posted）→ 地址路由
  *   RC 读 EP 配置 → CfgRd（CplD 返回）→ ID 路由
  *   EP 发 MSI   → MsgD（Posted MWr）→ 地址路由（到 RC MSI 地址）
+ *
+ * 适配：pciutils 3.x（Ubuntu 24.04 libpci）
  */
 
 #include <stdio.h>
@@ -51,18 +53,32 @@ static const char *gen_str(int gen)
     }
 }
 
-/* 找指定 ID 的 Capability */
+/*
+ * cap_find - 在配置空间里找指定 ID 的 Capability
+ *
+ * 遍历 PCIe Capability 链表：
+ *   每个 Capability: [Byte 0 = ID, Byte 1 = Next Cap Pointer]
+ *   从 PCI_CAPABILITY_LIST（=0x34）开始，逐个跳指针遍历
+ *
+ * 参数：dev-PCI设备，id-要查找的 Capability ID（如 0x10=PCIe, 0x05=MSI）
+ * 返回：找到则返回 Capability 起始偏移，找不到返回 0
+ */
 static int cap_find(struct pci_dev *dev, int id)
 {
     u8 pos = 0, cap_id, next;
     int ttl = 48;
-    pci_read_config_byte(dev, PCI_CAPLIST_PTR, &pos);
+
+    /* PCI_CAPABILITY_LIST（=0x34）：第一个 Capability 的指针 */
+    pci_read_byte(dev, PCI_CAPABILITY_LIST, &pos);
+
     while (ttl-- && pos) {
-        pci_read_config_byte(dev, pos, &cap_id);
-        pci_read_config_byte(dev, pos + 1, &next);
-        if (cap_id == 0xff) break;
-        if (cap_id == id)   return pos;
-        pos = next;
+        /* 读 Capability ID（Byte 0）*/
+        pci_read_byte(dev, pos, &cap_id);
+        /* 读下一个 Capability 指针（Byte 1）*/
+        pci_read_byte(dev, pos + 1, &next);
+        if (cap_id == 0xff) break;   /* 链表结束 */
+        if (cap_id == id)   return pos;  /* 找到目标 Capability */
+        pos = next;  /* 跳到下一个 */
     }
     return 0;
 }
@@ -74,77 +90,82 @@ int main(int argc, char **argv)
     pci_scan_bus(pacc);
 
     const char *dev_id = argc > 1 ? argv[1] : "00:00.0";
-    unsigned b, dev, fn;
+    unsigned b, d, f;
 
-    if (sscanf(dev_id, "%x:%x.%x", &b, &dev, &fn) != 3) {
-        fprintf(stderr, "用法: %s [域:]总线:设备.功能\\n", argv[0]);
+    /* 解析命令行参数：域:总线.设备.功能，支持 "00:00.0" 格式 */
+    if (sscanf(dev_id, "%x:%x.%x", &b, &d, &f) != 3) {
+        fprintf(stderr, "用法: %s [域:]总线:设备.功能\n", argv[0]);
         pci_cleanup(pacc);
         return 1;
     }
 
-    struct pci_dev *p = pci_get_dev(pacc, 0, b, dev, fn);
+    /* 直接用 p->bus / p->dev / p->func 访问地址字段，不需要格式化函数 */
+    struct pci_dev *p = pci_get_dev(pacc, 0, b, d, f);
     if (!p) {
-        fprintf(stderr, "设备 %s 未找到\\n", dev_id);
+        fprintf(stderr, "设备 %s 未找到\n", dev_id);
         pci_cleanup(pacc);
         return 1;
     }
 
     u16 vendor, device;
-    pci_read_config_word(p, PCI_VENDOR_ID, &vendor);
-    pci_read_config_word(p, PCI_DEVICE_ID, &device);
+    pci_read_word(p, PCI_VENDOR_ID, &vendor);
+    pci_read_word(p, PCI_DEVICE_ID, &device);
 
-    printf("=== %s ===\\n", dev_id);
-    printf("  Vendor ID   : 0x%04x\\n", vendor);
-    printf("  Device ID   : 0x%04x\\n", device);
+    printf("=== %s ===\n", dev_id);
+    printf("  Vendor ID   : 0x%04x\n", vendor);
+    printf("  Device ID   : 0x%04x\n", device);
 
-    /* PCIe Cap */
-    int pcie_cap = cap_find(p, 0x10);
+    /* ========== PCIe Capability ========== */
+    int pcie_cap = cap_find(p, 0x10);  /* PCIe Cap ID = 0x10 */
     if (pcie_cap) {
         u16 pcie_hdr, lnksta;
-        pci_read_config_word(p, pcie_cap, &pcie_hdr);
-        pci_read_config_word(p, pcie_cap + 0x12, &lnksta);
+        /* PCIe Cap Header: Byte[0]=ID, Byte[1]=Next, Word[1]=Device/Port Type + Link Status */
+        pci_read_word(p, pcie_cap, &pcie_hdr);
+        /* PCIe Cap + 0x12 = Link Status Register (PCI_EXP_LNKSTA) */
+        pci_read_word(p, pcie_cap + 0x12, &lnksta);
 
         u8 dev_type = (pcie_hdr >> 4) & 0xf;
-        int gen  = lnksta & 0xf;
+        int gen   = lnksta & 0xf;
         int width = (lnksta >> 4) & 0x3f;
 
-        printf("  PCIe Cap    : offset 0x%02x\\n", pcie_cap);
-        printf("  Device Type : %s\\n", pcie_type_str(dev_type));
-        printf("  协商速率   : %s\\n", gen_str(gen));
-        printf("  协商宽度   : x%d\\n", width);
+        printf("  PCIe Cap    : offset 0x%02x\n", pcie_cap);
+        printf("  Device Type : %s\n", pcie_type_str(dev_type));
+        printf("  协商速率   : %s\n", gen_str(gen));
+        printf("  协商宽度   : x%d\n", width);
     } else {
-        printf("  PCIe Cap    : 无（传统 PCI 设备）\\n");
+        printf("  PCIe Cap    : 无（传统 PCI 设备）\n");
     }
 
-    /* MSI Cap */
-    int msi_cap = cap_find(p, 0x05);
+    /* ========== MSI Capability ========== */
+    int msi_cap = cap_find(p, 0x05);  /* MSI Cap ID = 0x05 */
     if (msi_cap) {
         u16 ctrl;
-        pci_read_config_word(p, msi_cap + 2, &ctrl);
+        /* MSI Cap + 2 = Message Control Register */
+        pci_read_word(p, msi_cap + 2, &ctrl);
         int vectors = 1 << ((ctrl >> 1) & 0x7);
-        printf("  MSI Cap     : offset 0x%02x, %d vectors\\n", msi_cap, vectors);
+        printf("  MSI Cap     : offset 0x%02x, %d vectors\n", msi_cap, vectors);
     }
 
-    /* TLP 类型总结（根据 Device Type）*/
-    printf("\\n  TLP 角色分析:\\n");
+    /* ========== TLP 类型总结（根据 Device Type）========== */
+    printf("\n  TLP 角色分析:\n");
     int pcie = cap_find(p, 0x10);
     if (pcie) {
         u16 hdr;
-        pci_read_config_word(p, pcie, &hdr);
+        pci_read_word(p, pcie, &hdr);
         u8 type = (hdr >> 4) & 0xf;
         if (type == 4)
-            printf("    本设备是 RC Root Port\\n"
-                   "    - 发给 EP 的读: MRd (Non-Posted, CplD 返回)\\n"
-                   "    - 发给 EP 的写: MWr (Posted)\\n"
-                   "    - 枚举 EP: CfgRd (ID 路由)\\n");
+            printf("    本设备是 RC Root Port\n"
+                   "    - 发给 EP 的读: MRd (Non-Posted, CplD 返回)\n"
+                   "    - 发给 EP 的写: MWr (Posted)\n"
+                   "    - 枚举 EP: CfgRd (ID 路由)\n");
         else if (type == 0 || type == 1)
-            printf("    本设备是 EP\\n"
-                   "    - 收到 RC 的 MRd → 返回 CplD\\n"
-                   "    - 收到 RC 的 MWr → 无需响应（Posted）\\n"
-                   "    - 发 MSI 中断 → MsgD (MWr 到 RC MSI 地址)\\n");
+            printf("    本设备是 EP\n"
+                   "    - 收到 RC 的 MRd → 返回 CplD\n"
+                   "    - 收到 RC 的 MWr → 无需响应（Posted）\n"
+                   "    - 发 MSI 中断 → MsgD (MWr 到 RC MSI 地址)\n");
         else
-            printf("    本设备是 Switch/Bridge\\n"
-                   "    - 转发 TLP（地址路由 or ID 路由）\\n");
+            printf("    本设备是 Switch/Bridge\n"
+                   "    - 转发 TLP（地址路由 or ID 路由）\n");
     }
 
     pci_free_dev(p);

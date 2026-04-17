@@ -11,6 +11,8 @@
  *   - Link Training 状态
  *
  * 参考：PCIe Base Spec Rev 5.0 Chapter 7.8.3 (Link Status Register)
+ *
+ * 适配：pciutils 3.x（Ubuntu 24.04 libpci）
  */
 
 #include <stdio.h>
@@ -29,14 +31,20 @@ static const char *gen_str(int gen)
     }
 }
 
+/*
+ * pcie_cap_find - 找 PCIe Capability（ID=0x10）
+ *
+ * 从 PCI_CAPABILITY_LIST（=0x34）开始遍历 Capability 链表
+ * 返回：PCIe Capability 起始偏移，找不到返回 0
+ */
 static int pcie_cap_find(struct pci_dev *dev)
 {
     u8 pos = 0, id, next;
     int ttl = 48;
-    pci_read_config_byte(dev, PCI_CAPLIST_PTR, &pos);
+    pci_read_byte(dev, PCI_CAPABILITY_LIST, &pos);
     while (ttl-- && pos) {
-        pci_read_config_byte(dev, pos, &id);
-        pci_read_config_byte(dev, pos + 1, &next);
+        pci_read_byte(dev, pos, &id);
+        pci_read_byte(dev, pos + 1, &next);
         if (id == 0x10) return pos;
         if (id == 0xff) break;
         pos = next;
@@ -51,40 +59,40 @@ int main(int argc, char **argv)
     pci_scan_bus(pacc);
 
     const char *dev_id = argc > 1 ? argv[1] : "00:00.0";
-    unsigned b, dev, fn;
+    unsigned b, d, f;
 
-    if (sscanf(dev_id, "%x:%x.%x", &b, &dev, &fn) != 3) {
-        fprintf(stderr, "用法: %s [域:]总线:设备.功能\\n", argv[0]);
+    if (sscanf(dev_id, "%x:%x.%x", &b, &d, &f) != 3) {
+        fprintf(stderr, "用法: %s [域:]总线:设备.功能\n", argv[0]);
         pci_cleanup(pacc);
         return 1;
     }
 
-    struct pci_dev *p = pci_get_dev(pacc, 0, b, dev, fn);
-    if (!p) { fprintf(stderr, "设备未找到\\n"); return 1; }
+    struct pci_dev *p = pci_get_dev(pacc, 0, b, d, f);
+    if (!p) { fprintf(stderr, "设备未找到\n"); return 1; }
 
     int cap = pcie_cap_find(p);
-    if (!cap) { printf("无 PCIe Cap\\n"); return 1; }
+    if (!cap) { printf("无 PCIe Cap\n"); return 1; }
 
     /* PCIe Cap + 0x12 = Link Status Register (PCI_EXP_LNKSTA) */
     u16 lnksta;
-    pci_read_config_word(p, cap + 0x12, &lnksta);
+    pci_read_word(p, cap + 0x12, &lnksta);
 
-    int gen   = lnksta & 0xf;
-    int width = (lnksta >> 4) & 0x3f;
-    int traing = (lnksta >> 15) & 0x1;
+    int gen    = lnksta & 0xf;          /* Bit[3:0]  = Negotiated Link Speed */
+    int width  = (lnksta >> 4) & 0x3f; /* Bit[9:4] = Negotiated Link Width */
+    int traing = (lnksta >> 15) & 0x1; /* Bit[15]   = Link Training */
 
-    printf("设备 %s:\\n", dev_id);
-    printf("  协商速率  : %s\\n", gen_str(gen));
-    printf("  协商宽度  : x%d\\n", width);
-    printf("  LTSSM     : %s\\n", traing ? "L0（训练完成）" : "训练中 / Recovery");
+    printf("设备 %s:\n", dev_id);
+    printf("  协商速率  : %s\n", gen_str(gen));
+    printf("  协商宽度  : x%d\n", width);
+    printf("  LTSSM     : %s\n", traing ? "L0（训练完成）" : "训练中 / Recovery");
 
-    /* PCIe Cap + 0x0C = Link Capabilities */
+    /* PCIe Cap + 0x0C = Link Capabilities Register */
     u16 lcap;
-    pci_read_config_word(p, cap + 0x0C, &lcap);
-    int max_gen  = lcap & 0xf;
-    int max_width = (lcap >> 4) & 0x3f;
-    printf("  硬件支持最大速率: Gen%d (%s)\\n", max_gen, gen_str(max_gen));
-    printf("  硬件支持最大宽度: x%d\\n", max_width);
+    pci_read_word(p, cap + 0x0C, &lcap);
+    int max_gen  = lcap & 0xf;           /* Bit[3:0]  = Max Link Speed */
+    int max_width = (lcap >> 4) & 0x3f;/* Bit[9:4] = Max Link Width */
+    printf("  硬件支持最大速率: Gen%d (%s)\n", max_gen, gen_str(max_gen));
+    printf("  硬件支持最大宽度: x%d\n", max_width);
 
     pci_free_dev(p);
     pci_cleanup(pacc);

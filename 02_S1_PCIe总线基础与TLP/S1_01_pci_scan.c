@@ -11,6 +11,8 @@
  *   帮助理解 PCIe 拓扑：
  *     00:00.0 通常是 RC（Host Bridge）
  *     01:00.0+ 是 EP 设备
+ *
+ * 适配：pciutils 3.x（Ubuntu 24.04 默认版本）
  */
 
 #include <stdio.h>
@@ -18,64 +20,98 @@
 #include <string.h>
 #include <pci/pci.h>
 
+/*
+ * pcie_cap_find - 在配置空间里找 PCIe Capability 位置
+ *
+ * PCIe Capability ID = 0x10
+ * 每个 Capability 的结构：Byte[0]=ID, Byte[1]=Next Cap Pointer
+ * 从 PCI_CAP_LIST_POINTER（通常是 0x34）开始遍历链表
+ *
+ * 返回： PCIe Capability 的起始偏移（字节），找不到返回 0
+ */
 static int pcie_cap_find(struct pci_dev *dev)
 {
     u8 pos = 0, id, next;
     int ttl = 48;
-    pci_read_config_byte(dev, PCI_CAPLIST_PTR, &pos);
+
+    /* PCI_CAP_LIST_POINTER（0x34）：第一个 Capability 的指针 */
+    pci_read_byte(dev, PCI_CAP_LIST_POINTER, &pos);
+
     while (ttl-- && pos) {
-        pci_read_config_byte(dev, pos, &id);
-        pci_read_config_byte(dev, pos + 1, &next);
-        if (id == 0x10) return pos;
-        if (id == 0xff) break;
-        pos = next;
+        /* 读 Capability ID（Byte 0）*/
+        pci_read_byte(dev, pos, &id);
+        /* 读下一个 Capability 指针（Byte 1）*/
+        pci_read_byte(dev, pos + 1, &next);
+        if (id == 0x10)
+            return pos;  /* 找到 PCIe Capability（ID=0x10）*/
+        if (id == 0xff)
+            break;  /* 链表结束 */
+        pos = next;  /* 跳到下一个 Capability */
     }
     return 0;
 }
 
 int main(int argc, char **argv)
 {
+    /* 分配并初始化 pci_access 结构（必须先调用）*/
     struct pci_access *pacc = pci_alloc();
-    pci_init(pacc);
-    pci_scan_bus(pacc);
+    pci_init(pacc);       /* 初始化 libpci */
+    pci_scan_bus(pacc);   /* 扫描总线，填充 devices 链表 */
 
-    printf("%-12s %-6s %-6s %-8s %-20s %s\\n",
+    printf("%-12s %-6s %-6s %-8s %-20s %s\n",
            "PCI ID", "Vendor", "Device", "Class", "Type", "TLP Role");
-    printf("%-12s %-6s %-6s %-8s %-20s %s\\n",
+    printf("%-12s %-6s %-6s %-8s %-20s %s\n",
            "------", "------", "------", "-----", "----", "--------");
 
+    /* 遍历总线上的每一个设备 */
     for (struct pci_dev *p = pacc->devices; p; p = p->next) {
         char addr[13];
-        pci_get_devaddr(p, addr, sizeof(addr));
+
+        /* pci_get_slot 把 device 地址格式化成 "Bus:Dev.Fn" 字符串 */
+        pci_get_slot(p, addr);
 
         u16 vendor, device, class_code;
         u8 hdr_type;
-        pci_read_config_word(p, PCI_VENDOR_ID, &vendor);
-        pci_read_config_word(p, PCI_DEVICE_ID, &device);
-        pci_read_config_word(p, PCI_CLASS_DEVICE, &class_code);
-        pci_read_config_byte(p, PCI_HEADER_TYPE, &hdr_type);
 
-        if (vendor == 0xffff) continue;  /* 空槽 */
+        /* 读取配置空间标准寄存器 */
+        pci_read_word(p, PCI_VENDOR_ID, &vendor);
+        pci_read_word(p, PCI_DEVICE_ID, &device);
+        pci_read_word(p, PCI_CLASS_DEVICE, &class_code);
+        pci_read_byte(p, PCI_HEADER_TYPE, &hdr_type);
 
-        /* Class: upper 8 bits = base, lower 8 bits = sub */
+        if (vendor == 0xffff)
+            continue;  /* 空槽（没有插设备），跳过 */
+
+        /* class_code: upper 8 bits = base class, lower 8 bits = sub class */
         int base = class_code >> 8;
         int sub  = class_code & 0xff;
 
-        const char *type_str = (hdr_type & 0x7f) == 0 ? "Type 0 (EP)" : "Type 1 (Bridge/RC)";
+        /* 默认类型 */
+        const char *type_str = (hdr_type & 0x7f) == 0 ? "Type 0 (EP)" : "Type 1 (RC/Bridge)";
         const char *tlp_role = "—";
 
+        /* 找 PCIe Capability，从里面读 Device/Port Type */
         int pcie_cap = pcie_cap_find(p);
         if (pcie_cap) {
             u16 pcie_hdr;
-            pci_read_config_word(p, pcie_cap, &pcie_hdr);
+            pci_read_word(p, pcie_cap, &pcie_hdr);
             u8 dev_type = (pcie_hdr >> 4) & 0xf;
+
+            /* PCIe Spec 定义的各种设备类型 */
             const char *type_map[] = {
-                "PCIe EP", "Legacy EP", "?", "?", "RC Root Port",
-                "Switch Port", "Bridge", "Bridge"
+                "PCIe EP",         /* 0: PCI Express Endpoint          */
+                "Legacy EP",       /* 1: Legacy PCI Express Endpoint   */
+                "?",               /* 2: Reserved                       */
+                "?",               /* 3: Reserved                       */
+                "RC Root Port",    /* 4: Root Port of RC                */
+                "Switch Port",     /* 5: Switch Port                   */
+                "Bridge",          /* 6: PCIe-to-PCI Bridge            */
+                "Bridge"           /* 7: PCIe-to-PCI Bridge (alt)      */
             };
             if (dev_type <= 7)
                 type_str = type_map[dev_type];
 
+            /* 根据设备类型，说明它的 TLP 角色 */
             if (dev_type == 4)
                 tlp_role = "发起 MRd/MWr/CfgRd → 枚举和管理 EP";
             else if (dev_type == 0 || dev_type == 1)
@@ -84,10 +120,10 @@ int main(int argc, char **argv)
                 tlp_role = "转发 TLP（地址路由 / ID 路由）";
         }
 
-        printf("%-12s 0x%04x  0x%04x  %02x.%02x   %-20s %s\\n",
+        printf("%-12s 0x%04x  0x%04x  %02x.%02x   %-20s %s\n",
                addr, vendor, device, base, sub, type_str, tlp_role);
     }
 
-    pci_cleanup(pacc);
+    pci_cleanup(pacc);  /* 释放资源 */
     return 0;
 }
