@@ -1,27 +1,68 @@
 # S0_01_Makefile - 环境验证 + 脚本执行
-.PHONY: all check env debug clean
+#
+# 本文件不是用来编译 C 代码的，而是"快捷命令合集"
+# 用 make 调用 shell 脚本，统一管理环境检查和启动操作
+#
+# 用法：
+#   make check   ← 检查 QEMU / GCC / GDB / linux-headers 是否安装
+#   make env     ← 运行 S0_env_check.sh（详细环境检查脚本）
+#   make debug   ← 运行 S0_qemu_gdb_debug.sh（启动 QEMU + GDB 调试模式）
+#   make test    ← 运行 S0_qemu_pcie_test.sh（快速测试 QEMU PCIe 环境）
+#   make clean   ← 清理（无编译产物，只是保持接口一致）
 
+# ========== 伪目标声明 ==========
+# .PHONY 表示这些不是文件名，只是"动作"名称
+# make check 不会去检查是否存在叫 "check" 的文件
+
+.PHONY: all check env debug test clean
+
+# ========== 默认目标 ==========
+# 直接输入 "make" 时执行 all（这里是 check）
 all: check
 
+# ========== check 目标 ==========
+# 检查关键工具是否已安装（QEMU / GCC / GDB / linux-headers）
+# 用于快速验证环境是否就绪
 check:
 	@echo "=== S0 环境检查 ==="
-	@which qemu-system-x86_64 >/dev/null 2>&1 && \
-		echo "[OK] QEMU: $$(qemu-system-x86_64 --version | head -1)" || \
+	# 检查 qemu-system-aarch64 是否在 PATH 里
+	@which qemu-system-aarch64 >/dev/null 2>&1 && \
+		echo "[OK] QEMU: $$(qemu-system-aarch64 --version | head -1)" || \
 		echo "[FAIL] QEMU not found"
+	# 检查 gcc 是否可用
 	@gcc --version 2>/dev/null | head -1 || echo "[FAIL] gcc"
+	# 检查 GDB 的 Python 扩展是否可用（调试内核模块需要）
 	@gdb -batch -ex "python print(1)" 2>/dev/null >/dev/null && echo "[OK] GDB Python" || echo "[FAIL] GDB Python"
+	# 检查 linux-headers 是否已安装（编译内核模块必需）
 	@ls /lib/modules/$$(uname -r)/build/Makefile 2>/dev/null >/dev/null && \
 		echo "[OK] linux-headers" || echo "[FAIL] linux-headers"
 	@echo "=== 检查完成 ==="
+#   @ 开头：不打印这行命令本身，只显示 echo 的输出
+#   && \  ：前一条命令成功才执行下一条（逻辑 AND）
+#   ||     ：前一条命令失败才执行（逻辑 OR）
+#   $$     ：在 Makefile 里表示一个真正的 $（避免被 Make 解释）
+#   2>/dev/null：把标准错误也扔掉，不显示错误信息
 
+# ========== env 目标 ==========
+# 调用 S0_env_check.sh，做完整的详细环境检查
 env:
 	@bash S0_env_check.sh
 
+# ========== debug 目标 ==========
+# 调用 S0_qemu_gdb_debug.sh，启动 QEMU 并监听 GDB 端口
+# 启动后 QEMU 会 freeze，等待 GDB 连接才继续运行
+# 另一个终端运行：gdb /usr/lib/debug/boot/vmlinuz-$(uname -r)
+# 然后输入：(gdb) target remote localhost:1234
 debug:
 	@bash S0_qemu_gdb_debug.sh
 
+# ========== test 目标 ==========
+# 调用 S0_qemu_pcie_test.sh，快速启动 QEMU virt PCIe 环境
+# 用于验证 QEMU + PCIe RC 模拟是否正常工作
 test:
 	@bash S0_qemu_pcie_test.sh
 
+# ========== clean 目标 ==========
+# S0 没有 C 代码编译产物，保持接口一致而已
 clean:
-	@echo "S0 无编译产物"
+	@echo "S0 无编译产物（无文件需清理）"
