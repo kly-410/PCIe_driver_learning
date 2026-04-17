@@ -1,159 +1,120 @@
 /*
- * S1_02_doe.c - DOE Mailbox 遍历与 VPD 访问演示
+ * S1_02_doe.c - DOE（Data Object Exchange）基本操作演示
  *
  * 编译：gcc -o S1_02_doe S1_02_doe.c -lpci
- * 运行：sudo ./S1_02_doe [域:]总线:设备.功能
+ * 运行：sudo ./S1_02_doe
  *
  * 功能：
- *   1. 扫描设备的 DOE Mailbox（Cap ID = 0x23）
- *   2. 读取 DOE_CAP_HDR，获取 Vendor ID 和版本
- *   3. 发起标准 VPD DOE 读（Object Type = 3）
- *   4. 轮询 DOE_INT_STATUS 等待完成
+ *   遍历所有 PCIe 设备，寻找 VSEC（Vendor-Specific Extended Cap）
+ *   在 VSEC 内找 DOE Capability（ID = 0x02）
+ *   读取 DOE 对象 header
  *
- * 参考：PCIe Base Spec Rev 5.0 Chapter 6.30
- * 源码：drivers/pci/pci/doe.c
+ * DOE（Data Object Exchange）：
+ *   PCIe 4.0 引入的带内配置协议，用于访问扩展配置对象
+ *   通过 MWr/MRd TLP 携带 DOE 负载，传递 Data Object
+ *   常用于：CMA（配置管理器访问）、IDE（带内调试）
+ *
+ * 适配：pciutils 3.x（Ubuntu 24.04 libpci）
+ *   - pci_read_byte/word：返回值方式，不需要指针参数
+ *   - Extended Capability 从 0x100 开始遍历
  */
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
 #include <pci/pci.h>
-#include <stdint.h>
-#include <errno.h>
 
-#define PCI_DOE_CAP_HDR      0x04
-#define PCI_DOE_INT_STATUS   0x08
-#define PCI_DOE_OBJECT_HDR   0x10
-#define PCI_DOE_DATA         0x14
-
-#define PCI_DOE_VENDOR_VPD   3   /* VPD 对象 */
-#define PCI_DOE_VENDOR_CIS   4   /* CIS 对象 */
-#define PCI_DOE_TIMEOUT_MS   1000
-
-/* 在配置空间中查找 DOE Cap（Cap ID = 0x23）*/
-static int find_doe_cap(struct pci_dev *dev)
+/*
+ * vsce_find_doe - 在 VSEC 内找 DOE Capability（ID = 0x02）
+ *
+ * VSEC 内 Capability 链表遍历：
+ *   从 VSEC 起始 + 0x0C 开始（DOE 通常在这个偏移之后）
+ *   每个 Capability：Byte[0]=ID, Byte[1]=Next Pointer
+ *
+ * 返回：DOE Capability 偏移，找不到返回 0
+ */
+static int vsce_find_doe(struct pci_dev *dev, int vsce_base)
 {
-    u8 pos = 0, id, next;
-    int ttl = 48;
-
-    pci_read_config_byte(dev, PCI_CAPLIST_PTR, &pos);
+    u8 pos = pci_read_byte(dev, vsce_base + 0x0C);  /* 第一个 DOE 指针 */
+    int ttl = 32;
     while (ttl-- && pos) {
-        pci_read_config_byte(dev, pos, &id);
-        pci_read_config_byte(dev, pos + 1, &next);
-        if (id == 0x23)           /* DOE Cap ID */
+        u8 id = pci_read_byte(dev, pos);
+        u8 next = pci_read_byte(dev, pos + 1);
+        if (id == 0xFF) break;   /* 链表结束 */
+        if (id == 0x02) {        /* DOE Capability ID = 0x02 */
             return pos;
-        if (id == 0xff) break;    /* 无效 Cap */
+        }
         pos = next;
     }
-    return 0;  /* 未找到 */
-}
-
-/* 轮询等待 DOE 完成（DONE 位=1 或 BUSY 位清零）*/
-static int doe_poll_done(struct pci_dev *dev, int offset)
-{
-    int timeout = PCI_DOE_TIMEOUT_MS;
-    u32 status;
-
-    while (timeout--) {
-        pci_read_config_dword(dev, offset + PCI_DOE_INT_STATUS, &status);
-
-        /* BUSY 位 (bit 31) = 1: 还在处理，继续等 */
-        if (status & 0x80000000) {
-            usleep(1000);
-            continue;
-        }
-
-        /* DONE 位 (bit 0) = 1: 完成 */
-        if (status & 0x1)
-            return 0;
-
-        /* 其他错误 */
-        return -EIO;
-    }
-
-    return -ETIMEDOUT;
-}
-
-/* 发起 DOE 读（同步阻塞）*/
-static int doe_read_object(struct pci_dev *dev, int doe_offset,
-                          u16 object_type, u32 *out_data)
-{
-    u32 hdr;
-    int ret;
-
-    /* 写 Object Header: type[31:16] | vendor_id[15:0] = 0 (PCI-SIG) */
-    hdr = (object_type << 16);  /* vendor_id = 0 for standard objects */
-    pci_write_config_dword(dev, doe_offset + PCI_DOE_OBJECT_HDR, hdr);
-
-    /* 清 DONE 状态，触发 DOE 事务 */
-    pci_write_config_dword(dev, doe_offset + PCI_DOE_INT_STATUS, 0x00000001);
-
-    /* 轮询等待完成 */
-    ret = doe_poll_done(dev, doe_offset);
-    if (ret < 0)
-        return ret;
-
-    /* 读响应数据（第一个 DW）*/
-    pci_read_config_dword(dev, doe_offset + PCI_DOE_DATA, out_data);
-
-    /* 清 DONE 状态 */
-    pci_write_config_dword(dev, doe_offset + PCI_DOE_INT_STATUS, 0x00000001);
-
     return 0;
 }
 
 int main(int argc, char **argv)
 {
+    (void)argc; (void)argv;
+
     struct pci_access *pacc = pci_alloc();
     pci_init(pacc);
     pci_scan_bus(pacc);
 
-    const char *dev_id = argc > 1 ? argv[1] : "00:00.0";
-    unsigned b, dev, fn;
+    printf("=== S1_02 DOE 检测 ===\n");
+    printf("遍历所有设备，寻找 VSEC + DOE Capability\n\n");
 
-    if (sscanf(dev_id, "%x:%x.%x", &b, &dev, &fn) != 3) {
-        fprintf(stderr, "用法: %s [域:]总线:设备.功能\\n", argv[0]);
-        fprintf(stderr, "示例: %s 00:00.0\\n", argv[0]);
-        pci_cleanup(pacc);
-        return 1;
+    int total_devices = 0;
+    int vsce_count = 0;
+    int doe_count = 0;
+
+    for (struct pci_dev *p = pacc->devices; p; p = p->next) {
+        char addr[16];
+        snprintf(addr, sizeof(addr), "%04x:%02x:%02x.%x",
+                 p->domain_16, p->bus, p->dev, p->func);
+
+        u16 vendor = pci_read_word(p, PCI_VENDOR_ID);
+        if (vendor == 0xFFFF) continue;
+        total_devices++;
+
+        /* PCIe Extended Capability 链表遍历（从 0x100 开始）*/
+        u16 next = 0x100;
+        int ttl = 64;
+        while (ttl-- && next) {
+            u32 ehdr = pci_read_long(p, next); /* Extended Cap Header */
+            u16 vid = ehdr & 0xFFFF;          /* 低16位 = VID */
+            u16 next_off = (ehdr >> 16) & 0xFFFC; /* 高16位低14位 = Next Offset */
+            if (vid == 0xFFFF) break;           /* 链表结束 */
+            if (vid == 0x000B) {                /* VSEC = Vendor-Specific Extended Cap */
+                /* VSEC Header: [0x00] VSEC ID, [0x02] VSEC Rev, [0x03] VSEC Length */
+                u16 vsce_id = pci_read_word(p, next + 4);
+                u8 rev = pci_read_byte(p, next + 6);
+                vsce_count++;
+                printf("设备 %s: VSEC at 0x%03x, VSEC_ID=0x%04x, Rev=0x%02x\n",
+                       addr, next, vsce_id, rev);
+
+                /* 在 VSEC 内找 DOE */
+                int doe_off = vsce_find_doe(p, next);
+                if (doe_off) {
+                    u16 doe_hdr = pci_read_word(p, doe_off);
+                    doe_count++;
+                    printf("  → DOE at 0x%02x, Header=0x%04x\n", doe_off, doe_hdr);
+                }
+            }
+            next = next_off;
+            if (next == 0) break;
+        }
     }
 
-    struct pci_dev *p = pci_get_dev(pacc, 0, b, dev, fn);
-    if (!p) {
-        fprintf(stderr, "设备 %s 未找到\\n", dev_id);
-        pci_cleanup(pacc);
-        return 1;
-    }
+    printf("\n=== 统计 ===\n");
+    printf("总设备数 : %d\n", total_devices);
+    printf("有 VSEC  : %d\n", vsce_count);
+    printf("有 DOE   : %d\n", doe_count);
 
-    int doe_offset = find_doe_cap(p);
-    if (!doe_offset) {
-        printf("设备 %s: 无 DOE Mailbox（正常，许多设备不支持）\\n", dev_id);
-        pci_free_dev(p);
-        pci_cleanup(pacc);
-        return 0;
-    }
+    if (doe_count == 0)
+        printf("\n（没有找到 DOE 设备，这是正常的——DOE 不是所有 PCIe 设备都有）\n");
 
-    printf("设备 %s: DOE Mailbox at offset 0x%02x\\n", dev_id, doe_offset);
+    printf("\n=== DOE 概念说明 ===\n");
+    printf("  DOE = Data Object Exchange（PCIe 4.0+）\n");
+    printf("  通过 MWr/MRd TLP 携带 DOE Data Object\n");
+    printf("  常用于：CMA / IDE（带内调试）\n");
+    printf("  DOE 不走 ID 路由，靠数据链路层传输\n");
 
-    /* 读 DOE Capability Header */
-    u32 cap_hdr;
-    pci_read_config_dword(p, doe_offset + PCI_DOE_CAP_HDR, &cap_hdr);
-    u16 vendor_id = cap_hdr & 0xffff;
-    u8  version   = (cap_hdr >> 16) & 0xff;
-    printf("  DOE Vendor ID = 0x%04x, Version = %d\\n", vendor_id, version);
-
-    /* 尝试读 VPD */
-    u32 vpd_data = 0;
-    int ret = doe_read_object(p, doe_offset, PCI_DOE_VENDOR_VPD, &vpd_data);
-    if (ret == -ETIMEDOUT)
-        printf("  VPD DOE: 超时（设备可能不支持）\\n");
-    else if (ret == -EIO)
-        printf("  VPD DOE: 协议错误\\n");
-    else
-        printf("  VPD DOE: 读成功，数据=0x%08x\\n", vpd_data);
-
-    pci_free_dev(p);
     pci_cleanup(pacc);
     return 0;
 }

@@ -1,15 +1,12 @@
 /*
- * S1_02_link_status.c - PCIe 链路状态读取
+ * S1_02_link_status.c - PCIe 链路状态快速读取（S1_02 简化版）
  *
  * 编译：gcc -o S1_02_link_status S1_02_link_status.c -lpci
- * 运行：sudo ./S1_02_link_status [域:]总线:设备.功能
+ * 运行：sudo ./S1_02_link_status [域:总线.设备.功能]
  *
- * 功能：读取 PCIe Cap Link Status 寄存器
- *   - 协商速率 (Gen1/2/3/4/5)
- *   - 协商宽度 (x1/x2/x4/x8/x16)
- *   - LTSSM 状态 (L0 / Recovery / Polling ...)
+ * 功能：读取 PCIe Cap Link Status，输出协商速率和宽度
  *
- * 参考：PCIe Base Spec Rev 5.0 Chapter 7.8.3 (Link Status Register)
+ * 适配：pciutils 3.x（Ubuntu 24.04 libpci）
  */
 
 #include <stdio.h>
@@ -28,16 +25,13 @@ static const char *gen_str(int gen)
     }
 }
 
-/* 在配置空间中查找 PCIe Cap（Cap ID = 0x10）*/
-static int find_pcie_cap(struct pci_dev *dev)
+static int pcie_cap_find(struct pci_dev *dev)
 {
-    u8 pos = 0, id, next;
+    u8 pos = pci_read_byte(dev, PCI_CAPABILITY_LIST);
     int ttl = 48;
-
-    pci_read_config_byte(dev, PCI_CAPLIST_PTR, &pos);
     while (ttl-- && pos) {
-        pci_read_config_byte(dev, pos, &id);
-        pci_read_config_byte(dev, pos + 1, &next);
+        u8 id = pci_read_byte(dev, pos);
+        u8 next = pci_read_byte(dev, pos + 1);
         if (id == 0x10) return pos;
         if (id == 0xff) break;
         pos = next;
@@ -52,46 +46,27 @@ int main(int argc, char **argv)
     pci_scan_bus(pacc);
 
     const char *dev_id = argc > 1 ? argv[1] : "00:00.0";
-    unsigned b, dev, fn;
-
-    if (sscanf(dev_id, "%x:%x.%x", &b, &dev, &fn) != 3) {
-        fprintf(stderr, "用法: %s [域:]总线:设备.功能\\n", argv[0]);
+    unsigned b, d, f;
+    if (sscanf(dev_id, "%x:%x.%x", &b, &d, &f) != 3) {
+        fprintf(stderr, "用法: %s [域:]总线:设备.功能\n", argv[0]);
         pci_cleanup(pacc);
         return 1;
     }
 
-    struct pci_dev *p = pci_get_dev(pacc, 0, b, dev, fn);
-    if (!p) {
-        fprintf(stderr, "设备 %s 未找到\\n", dev_id);
-        pci_cleanup(pacc);
-        return 1;
-    }
+    struct pci_dev *p = pci_get_dev(pacc, 0, b, d, f);
+    if (!p) { fprintf(stderr, "设备未找到\n"); return 1; }
 
-    int cap = find_pcie_cap(p);
-    if (!cap) {
-        printf("设备 %s: 无 PCIe Cap（传统 PCI 设备）\\n", dev_id);
-        pci_free_dev(p);
-        pci_cleanup(pacc);
-        return 0;
-    }
+    int cap = pcie_cap_find(p);
+    if (!cap) { printf("无 PCIe Cap\n"); return 1; }
 
-    /*
-     * PCIe Cap + 0x12 = Link Status Register (PCI_EXP_LNKSTA)
-     *   bit [3:0]  : Current Link Speed
-     *   bit [9:4]  : Negotiated Link Width
-     *   bit [15]   : Link Training (1=L0, 0=in progress/Recovery)
-     */
-    u16 lnksta;
-    pci_read_config_word(p, cap + 0x12, &lnksta);
+    /* PCIe Cap + 0x12 = Link Status Register (PCI_EXP_LNKSTA) */
+    u16 lnksta = pci_read_word(p, cap + 0x12);
+    int gen   = lnksta & 0xf;
+    int width = (lnksta >> 4) & 0x3f;
 
-    int gen    = lnksta & 0xf;
-    int width  = (lnksta >> 4) & 0x3f;
-    int traing = (lnksta >> 15) & 0x1;
-
-    printf("设备 %s:\\n", dev_id);
-    printf("  协商速率  : %s\\n", gen_str(gen));
-    printf("  协商宽度  : x%d\\n", width);
-    printf("  LTSSM 状态: %s\\n", traing ? "L0（训练完成）" : "训练中 / Recovery");
+    printf("设备 %s:\n", dev_id);
+    printf("  协商速率: %s\n", gen_str(gen));
+    printf("  协商宽度: x%d\n", width);
 
     pci_free_dev(p);
     pci_cleanup(pacc);
