@@ -13,12 +13,12 @@
 | 2 | S1_01 | PCIe 总线基础与 TLP | Spec | ✅ |
 | 3 | S1_02 | 链路层与 Flow Control + DOE | Spec | ✅ |
 | 4 | S1_03 | PCI/PCIe 配置空间（ECAM）| `pci.c` | ✅ |
-| 5 | S1_04 | BAR 地址映射与解码 | `setup-bus.c` | 🔨 下一课 |
-| 6 | S2_01 | PCI 子系统初始化 + 内核编程入门 | `bus.c:pci_scan_root_bus` | ⬜ |
-| 7 | S2_02 | pci_driver 注册模型 | `pci-driver.c` | ⬜ |
-| 8 | S2_03 | 资源管理（sysfs / /proc/iomem）| `pci.c`/`resource.c` | ⬜ |
-| 9 | S2_04 | MSI/MSI-X 中断路由 | `msi/msi.c` | ⬜ |
-| 10 | S2_05 | 电源管理 + Fundamental Reset + NPEM | `pci.c:pci_pm_*` | ⬜ |
+| 5 | S1_04 | BAR 地址映射与解码 | `setup-bus.c` | ✅ |
+| 6 | S2_01 | PCI 子系统初始化 + 内核编程入门 | `bus.c:pci_scan_root_bus` | ✅ |
+| 7 | S2_02 | pci_driver 注册模型 | `pci-driver.c` | ✅ |
+| 8 | S2_03 | 资源管理（sysfs / /proc/iomem）| `pci.c`/`resource.c` | ✅ |
+| 9 | S2_04 | MSI/MSI-X 中断路由 | `msi/msi.c` | ✅ |
+| 10 | S2_05 | 电源管理 + Fundamental Reset + NPEM | `pci.c:pci_pm_*` | ✅ |
 | 11 | S2_06 | LTR 延迟报告机制 | `pci.c:ltr_*` | ⬜ |
 | 12 | S2_07 | SR-IOV 与 VF 管理 | `iov.c` | ⬜ |
 | 13 | S3_01 | RC 驱动框架与注册 | `pci-driver.c` | ⬜ |
@@ -46,9 +46,9 @@
 
 ## 当前进度
 
-**第 1-5 课已交付（S0_01 ~ S1_04）**
+**第 1-10 课已交付（S0_01 ~ S2_05）**
 
-下一课：**第 6 课 · S2_01 — PCI 子系统初始化 + 内核编程入门**
+下一课：**第 11 课 · S2_06 — LTR 延迟报告机制**
 
 ---
 
@@ -75,4 +75,4 @@ S{n}_{XX}_自验.md   ← 自验勾选 + AI 评估问题
 ## 仓库
 
 GitHub: https://github.com/kly-410/pcie-linux-driver-learning
-本地: `/home/kly/Desktop/filedisk/code/PCIe_driver_learning/`
+本地: `~/work/code/PCIe_driver_learning/`
