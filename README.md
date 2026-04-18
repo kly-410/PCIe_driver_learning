@@ -64,6 +64,38 @@ S{n}_{XX}_自验.md   ← 自验勾选 + AI 评估问题
 
 ---
 
+## 命名规范
+
+### 源码文件
+```
+S{n}_{XX}_{program}.c
+```
+- `S{n}` — 阶段号（S0/S1/S2...）
+- `{XX}` — 课时序号（01/02/03...）
+- `{program}` — 程序名（不含课序号前缀）
+
+### 编译产出
+```
+{program}
+```
+Makefile 编译产出的可执行文件**不带课序号前缀**，与源码文件名中的 `{program}` 部分保持一致。
+
+### 实验命令
+```
+make {program}
+sudo ./{program} [BDF]
+```
+实验文档中的命令使用**无前缀的产出名称**。
+
+### 示例
+| 源码 | 产出 | 实验命令 |
+|------|------|---------|
+| `S1_01_tlp_type.c` | `tlp_type` | `make tlp_type` / `sudo ./tlp_type 00:00.0` |
+| `S1_02_doe.c` | `doe` | `make doe` / `sudo ./doe $dev` |
+| `S1_04_bar_decode.c` | `bar_decode` | `make bar_decode` / `sudo ./bar_decode 01:00.0` |
+
+---
+
 ## 学习节奏
 
 每批交付 1-2 课，学完做自验，通过后再继续下一课。
