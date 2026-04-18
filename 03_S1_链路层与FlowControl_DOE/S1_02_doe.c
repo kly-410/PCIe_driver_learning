@@ -10,7 +10,7 @@
  *   读取 DOE 对象 header
  *
  * DOE（Data Object Exchange）：
- *   PCIe 4.0 引入的带内配置协议，用于访问扩展配置对象
+ *   PCIe r6.0 (2022) 引入的带内配置协议，用于访问扩展配置对象
  *   通过 MWr/MRd TLP 携带 DOE 负载，传递 Data Object
  *   常用于：CMA（配置管理器访问）、IDE（带内调试）
  *
@@ -110,7 +110,7 @@ int main(int argc, char **argv)
         printf("\n（没有找到 DOE 设备，这是正常的——DOE 不是所有 PCIe 设备都有）\n");
 
     printf("\n=== DOE 概念说明 ===\n");
-    printf("  DOE = Data Object Exchange（PCIe 4.0+）\n");
+    printf("  DOE = Data Object Exchange（PCIe r6.0, sec 6.30）\n");
     printf("  通过 MWr/MRd TLP 携带 DOE Data Object\n");
     printf("  常用于：CMA / IDE（带内调试）\n");
     printf("  DOE 不走 ID 路由，靠数据链路层传输\n");

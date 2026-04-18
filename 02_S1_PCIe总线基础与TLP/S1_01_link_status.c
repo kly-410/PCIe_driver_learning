@@ -78,7 +78,7 @@ int main(int argc, char **argv)
 
     int gen    = lnksta & 0xf;           /* Bit[3:0]  = Negotiated Link Speed */
     int width  = (lnksta >> 4) & 0x3f; /* Bit[9:4] = Negotiated Link Width */
-    int traing = (lnksta >> 15) & 0x1; /* Bit[15]   = Link Training */
+    int traing = (lnksta >> 11) & 0x1; /* Bit[11]  = Link Training (PCI_EXP_LNKSTA_LT) */
 
     printf("设备 %s:\n", dev_id);
     printf("  协商速率  : %s\n", gen_str(gen));
