@@ -21,7 +21,7 @@ LDFLAGS := -lpci
 #   pci_scan、tlp_type、link_status 三个程序都需要访问 PCIe 配置空间
 #   所以编译时都要链接 -lpci
 
-PROGS   := S1_01_tlp_type S1_01_link_status S1_01_pci_scan
+PROGS   := tlp_type link_status scan
 #   PROGS      定义要生成哪些可执行文件（用空格分隔）
 #   这里是三个独立程序，互不影响
 
@@ -33,13 +33,8 @@ PROGS   := S1_01_tlp_type S1_01_link_status S1_01_pci_scan
 
 # ========== 默认目标 ==========
 # 输入 "make"（不带参数）时执行 all
-all:
-	@echo "S1_01 可用编译目标："
-	@echo "  make tlp_type   - TLP 类型识别 + PCIe Cap 解析（需 libpci）"
-	@echo "  make link_status- 链路速率/宽度/LTSSM 读取（需 libpci）"
-	@echo "  make scan       - 扫描 PCIe 总线所有设备（需 libpci）"
-	@echo "  make all        - 编译以上全部三个程序"
-	@echo "  make clean      - 删除编译产物"
+all: $(PROGS)
+	@echo "编译完成: tlp_type link_status scan"
 #   @ 符号表示不打印这行命令本身，只打印 echo 的输出
 
 # ========== 编译规则 ==========
