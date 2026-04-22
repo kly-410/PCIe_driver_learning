@@ -2,5 +2,12 @@
 *.o
 *.so
 *.ko
+
+# 编译产物（实验/演示程序）
 scan
-S1_01_*
+tlp_type
+link_status
+link
+doe
+mmio
+S1_04_mmio
