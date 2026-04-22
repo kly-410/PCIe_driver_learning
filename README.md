@@ -13,13 +13,13 @@
 | 2 | S1_01 | PCIe 总线基础与 TLP | Spec | ✅ | ✅ |
 | 3 | S1_02 | 链路层与 Flow Control + DOE | Spec | ✅ | ✅ |
 | 4 | S1_03 | PCI/PCIe 配置空间（ECAM）| `pci.c` | ✅ | ✅ |
-| 5 | S1_04 | BAR 地址映射与解码 | `setup-bus.c` | ✅ | ⬜ |
+| 5 | S1_04 | BAR 地址映射与解码 | `setup-bus.c` | ✅ | ✅ |
 | 6 | S2_01 | PCI 子系统初始化 + 内核编程入门 | `bus.c:pci_scan_root_bus` | ✅ | ⬜ |
 | 7 | S2_02 | pci_driver 注册模型 | `pci-driver.c` | ✅ | ⬜ |
 | 8 | S2_03 | 资源管理（sysfs / /proc/iomem）| `pci.c`/`resource.c` | ✅ | ⬜ |
 | 9 | S2_04 | MSI/MSI-X 中断路由 | `msi/msi.c` | ✅ | ⬜ |
 | 10 | S2_05 | 电源管理 + Fundamental Reset + NPEM | `pci.c:pci_pm_*` | ✅ | ⬜ |
-| 11 | S2_06 | LTR 延迟报告机制 | `pci.c:ltr_*` | ⬜ | ⬜ |
+| 11 | S2_06 | LTR 延迟报告机制 | `pci.c:ltr_*` | ✅ | ⬜ |
 | 12 | S2_07 | SR-IOV 与 VF 管理 | `iov.c` | ⬜ | ⬜ |
 | 13 | S3_01 | RC 驱动框架与注册 | `pci-driver.c` | ⬜ | ⬜ |
 | 14 | S3_02 | BAR 空间与 MMIO 读写 | `pci_iomap`/`ioremap` | ⬜ | ⬜ |
@@ -48,21 +48,43 @@
 ## 当前进度
 
 **已交付：第 1-11 课（S0_01 ~ S2_06）**
-**已学习：第 1-4 课（S0_01 ~ S1_03）**
+**已学习：第 1-5 课（S0_01 ~ S1_04）**
 
-下一课：**第 5 课 · S1_04 — BAR 地址映射与解码**
+下一课：**第 6 课 · S2_01 — PCI 子系统初始化与驱动注册模型**
 
 ---
 
-## 每课交付物（5 个文件）
+## 每课交付物（6 个文件）
 
 ```
 S{n}_{XX}_讲义.md   ← 原理 + 设计原因 + 错误案例 + 决策树
 S{n}_{XX}_代码.md   ← 完整 C 源码（2-3 个 .c 文件）
-S{n}_{XX}_Makefile  ← 编译模板
-S{n}_{XX}_实验.md   ← 实验步骤 + 验收标准
+S{n}_{XX}_Makefile  ← 编译模板（含逐行中文注释）
+S{n}_{XX}_实验.md   ← 实验步骤 + 验收标准 + 改错题（Challenge）
 S{n}_{XX}_自验.md   ← 自验勾选 + AI 评估问题
+预备_{主题}.md      ← 课前预备知识（本课程专用）
 ```
+
+---
+
+## 学习辅助文档
+
+| 文档 | 用途 |
+|:---|:---|
+| `预备_Kernel编程基础.md` | S2 阶段课前必读：内核模块/kmalloc/spin_lock/copy_from_user 等基础 API |
+| 各课讲义内的"前置依赖" | 明确本课依赖哪节已学内容 |
+| 各课实验内的"改错题" | 每课 1 个故意埋入的 bug，训练代码审查能力 |
+| 各课自验内的"AI 评估问题" | 学完后主动提问验证真理解，不是填表 |
+
+---
+
+## 学习节奏
+
+每批交付 1-2 课，学完做自验，通过后再继续下一课。
+
+遇到问题 → 看决策树 → dmesg / log 排查 → 还解决不了再问。
+
+学完 S1_04 后，建议先读 `预备_Kernel编程基础.md`，再进入 S2_01。
 
 ---
 
@@ -95,14 +117,6 @@ sudo ./{program} [BDF]
 | `S1_01_tlp_type.c` | `tlp_type` | `make tlp_type` / `sudo ./tlp_type 00:00.0` |
 | `S1_02_doe.c` | `doe` | `make doe` / `sudo ./doe $dev` |
 | `S1_04_bar_decode.c` | `bar_decode` | `make bar_decode` / `sudo ./bar_decode 01:00.0` |
-
----
-
-## 学习节奏
-
-每批交付 1-2 课，学完做自验，通过后再继续下一课。
-
-遇到问题 → 看决策树 → dmesg / log 排查 → 还解决不了再问。
 
 ---
 
